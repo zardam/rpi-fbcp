@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 
 #include <bcm_host.h>
 
@@ -108,6 +109,14 @@ int process() {
           int lastRow  = last / vinfo.xres;
           // printf("%d %d\n", firstRow, lastRow);
 
+#if 0
+// Try a full-width copy (single operation)
+memcpy(
+  (uint16_t *)&fbp[(firstRow * vinfo.xres) * 2],
+  &screenbuf[bufNum][firstRow * vinfo.xres],
+  vinfo.xres * (lastRow - firstRow + 1) * 2);
+#else
+// Try rect bounds (multiple memcpy's)
           int firstCol = vinfo.xres - 1, lastCol = 0;
           for(int row=firstRow; row <= lastRow; row++) {
             uint16_t *s = &screenbuf[2][row * vinfo.xres];
@@ -130,9 +139,10 @@ int process() {
             dst += vinfo.xres;
           }
 //          memcpy(fbp, screenbuf[2], vinfo.xres * vinfo.yres * 2);
+#endif
           bufNum = 1 - bufNum;
         }
-        usleep(1000000 / 60);
+        usleep(1000000 / 30);
     }
 
     munmap(fbp, finfo.smem_len);
