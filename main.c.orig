@@ -21,8 +21,6 @@ int process() {
     struct fb_var_screeninfo vinfo;
     struct fb_fix_screeninfo finfo;
 
-    uint16_t *screenbuf[3];
-    uint8_t bufNum = 0;
 
     bcm_host_init();
 
@@ -63,15 +61,6 @@ int process() {
         return -1;
     }
 
-    screenbuf[0] = (uint16_t *)malloc(vinfo.xres * vinfo.yres * 2 * 3);
-    if(!screenbuf[0]) {
-        printf("malloc fail");
-        return -1;
-    }
-    memset(screenbuf[0], 0, vinfo.xres * vinfo.yres * 2 * 2);
-    screenbuf[1] = &screenbuf[0][vinfo.xres * vinfo.yres];
-    screenbuf[2] = &screenbuf[1][vinfo.xres * vinfo.yres];
-
     fbp = (char*) mmap(0, finfo.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
     if (fbp <= 0) {
         syslog(LOG_ERR, "Unable to create mamory mapping");
@@ -85,54 +74,8 @@ int process() {
 
     while (1) {
         ret = vc_dispmanx_snapshot(display, screen_resource, 0);
-        // Transfer snamshot to screenbuf
-        vc_dispmanx_resource_read_data(screen_resource, &rect1,
-          (char *)screenbuf[bufNum], vinfo.xres * vinfo.bits_per_pixel / 8);
-        // Calculate delta between two screenbufs
-        for(int i=0; i<vinfo.xres * vinfo.yres; i++) {
-          screenbuf[2][i] = screenbuf[0][i] ^ screenbuf[1][i];
-        }
-        // Find bounding rect of nonzero pixels
-        uint32_t first, last;
-
-        // Find first nonzero word
-        for(first=0; (first < (vinfo.xres * vinfo.yres)) &&
-          !screenbuf[2][first]; first++);
-
-        if(first < (vinfo.xres * vinfo.yres)) {
-          // Find last nonzero word
-          for(last=vinfo.xres * vinfo.yres - 1; (last > first) &&
-            !screenbuf[2][last]; last--);
-
-          int firstRow = first / vinfo.xres;
-          int lastRow  = last / vinfo.xres;
-          // printf("%d %d\n", firstRow, lastRow);
-
-          int firstCol = vinfo.xres - 1, lastCol = 0;
-          for(int row=firstRow; row <= lastRow; row++) {
-            uint16_t *s = &screenbuf[2][row * vinfo.xres];
-            for(int col=0; col<vinfo.xres; col++) {
-              if(s[col]) {
-                if(col < firstCol) firstCol = col;
-                if(col > lastCol)  lastCol  = col;
-              }
-            }
-          }
-          // printf("(%d,%d) (%d,%d)\n", firstCol, firstRow, lastCol, lastRow);
-
-          int width = lastCol - firstCol + 1;
-          uint16_t *src, *dst;
-          src = &screenbuf[bufNum][firstRow * vinfo.xres + firstCol];
-          dst = (uint16_t *)&fbp[(firstRow * vinfo.xres + firstCol) * 2];
-          for(int row=firstRow; row <= lastRow; row++) {
-            memcpy(dst, src, width * 2);
-            src += vinfo.xres;
-            dst += vinfo.xres;
-          }
-//          memcpy(fbp, screenbuf[2], vinfo.xres * vinfo.yres * 2);
-          bufNum = 1 - bufNum;
-        }
-        usleep(1000000 / 60);
+        vc_dispmanx_resource_read_data(screen_resource, &rect1, fbp, vinfo.xres * vinfo.bits_per_pixel / 8);
+        usleep(25 * 1000);
     }
 
     munmap(fbp, finfo.smem_len);
