@@ -64,6 +64,7 @@ int process() {
         return -1;
     }
 
+    // Allocate 3 screen buffers (current, prior, delta)
     screenbuf[0] = (uint16_t *)malloc(vinfo.xres * vinfo.yres * 2 * 3);
     if(!screenbuf[0]) {
         printf("malloc fail");
@@ -89,37 +90,41 @@ int process() {
         // Transfer snamshot to screenbuf
         vc_dispmanx_resource_read_data(screen_resource, &rect1,
           (char *)screenbuf[bufNum], vinfo.xres * vinfo.bits_per_pixel / 8);
-        // Calculate delta between two screenbufs
-        for(int i=0; i<vinfo.xres * vinfo.yres; i++) {
-          screenbuf[2][i] = screenbuf[0][i] ^ screenbuf[1][i];
+
+        // Calculate XOR between two screenbufs
+        uint32_t *p0 = (uint32_t *)screenbuf[0], // 32-bit ops
+                 *p1 = (uint32_t *)screenbuf[1],
+                 *p2 = (uint32_t *)screenbuf[2];
+        for(int i=0; i<vinfo.xres * vinfo.yres / 2; i++) {
+          p2[i] = p0[i] ^ p1[i];
         }
+
         // Find bounding rect of nonzero pixels
         uint32_t first, last;
 
-        // Find first nonzero word
-        for(first=0; (first < (vinfo.xres * vinfo.yres)) &&
-          !screenbuf[2][first]; first++);
+        // Find first nonzero lword
+        for(first=0; (first < (vinfo.xres * vinfo.yres / 2)) && !p2[first];
+          first++);
 
-        if(first < (vinfo.xres * vinfo.yres)) {
-          // Find last nonzero word
-          for(last=vinfo.xres * vinfo.yres - 1; (last > first) &&
-            !screenbuf[2][last]; last--);
+        if(first < (vinfo.xres * vinfo.yres / 2)) { // ANY change?
+          // Find last nonzero lword
+          for(last=(vinfo.xres * vinfo.yres / 2) - 1; (last > first) &&
+            !p2[last]; last--);
 
-          int firstRow = first / vinfo.xres;
-          int lastRow  = last / vinfo.xres;
-          // printf("%d %d\n", firstRow, lastRow);
+          int firstRow = first / (vinfo.xres / 2);
+          int lastRow  = last  / (vinfo.xres / 2);
 
 #if 0
-// Try a full-width copy (single operation)
-memcpy(
-  (uint16_t *)&fbp[(firstRow * vinfo.xres) * 2],
-  &screenbuf[bufNum][firstRow * vinfo.xres],
-  vinfo.xres * (lastRow - firstRow + 1) * 2);
+          // Let's try a full-width copy (single memcpy operation)
+          memcpy(
+            (uint16_t *)&fbp[firstRow * vinfo.xres * 2],
+            &screenbuf[bufNum][firstRow * vinfo.xres],
+            vinfo.xres * (lastRow - firstRow + 1) * 2);
 #else
-// Try rect bounds (multiple memcpy's)
+          // Find actual rect bounds and use memcpy-per-row
           int firstCol = vinfo.xres - 1, lastCol = 0;
           for(int row=firstRow; row <= lastRow; row++) {
-            uint16_t *s = &screenbuf[2][row * vinfo.xres];
+            uint16_t *s = (uint16_t *)&p2[row * vinfo.xres / 2];
             for(int col=0; col<vinfo.xres; col++) {
               if(s[col]) {
                 if(col < firstCol) firstCol = col;
@@ -129,12 +134,12 @@ memcpy(
           }
           // printf("(%d,%d) (%d,%d)\n", firstCol, firstRow, lastCol, lastRow);
 
-          int width = lastCol - firstCol + 1;
-          uint16_t *src, *dst;
-          src = &screenbuf[bufNum][firstRow * vinfo.xres + firstCol];
-          dst = (uint16_t *)&fbp[(firstRow * vinfo.xres + firstCol) * 2];
+          int bytes = (lastCol - firstCol + 1) * 2;
+          uint16_t
+            *src = &screenbuf[bufNum][firstRow * vinfo.xres + firstCol],
+            *dst = (uint16_t *)&fbp[(firstRow * vinfo.xres + firstCol) * 2];
           for(int row=firstRow; row <= lastRow; row++) {
-            memcpy(dst, src, width * 2);
+            memcpy(dst, src, bytes);
             src += vinfo.xres;
             dst += vinfo.xres;
           }
@@ -142,7 +147,7 @@ memcpy(
 #endif
           bufNum = 1 - bufNum;
         }
-        usleep(1000000 / 30);
+        usleep(1000000 / 30); // 30 fps max
     }
 
     munmap(fbp, finfo.smem_len);
