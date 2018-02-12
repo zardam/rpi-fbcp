@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 
 SET(COMPILE_DEFINITIONS -Werror)
 set (CMAKE_CXX_STANDARD 99)
+SET(CMAKE_CXX_FLAGS "-std=c++0x")
 
 include_directories(/opt/vc/include)
 include_directories(/opt/vc/include/interface/vcos/pthreads)
